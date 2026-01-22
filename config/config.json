@@ -1,0 +1,5 @@
+{
+    "VideoParameter": "-c:v copy",
+    "AudioParameter": "-c:a ac3 -b:a 640k",
+    "OutputFormat": "mp4"
+}

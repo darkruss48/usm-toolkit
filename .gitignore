@@ -1,0 +1,51 @@
+# Build directories
+build/
+build_linux/
+cmake-build-*/
+out/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.sln
+*.vcxproj*
+CMakeSettings.json
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Compiled objects
+*.o
+*.obj
+*.exe
+*.out
+*.app
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+
+# Temp files
+*.tmp
+*.log
+*~
+
+# Extracted media files (from testing)
+*.m2v
+*.adx
+*.hca
+*.aix
+*.wav
+*.mp4
+*.mkv
+*.avi
+
+# OS files
+.DS_Store
+Thumbs.db
