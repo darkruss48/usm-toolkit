@@ -19,6 +19,7 @@
 #include "usm_toolkit.hpp"
 #include "usm_stream.hpp"
 #include "file_utils.hpp"
+#include "vp9_pipeline.hpp"
 #include "nlohmann/json.hpp"
 
 namespace fs = std::filesystem;
@@ -32,10 +33,12 @@ void print_usage() {
     std::cout << "Options for convert:\n";
     std::cout << "  -o, --output-dir <dir>  Specify output directory\n";
     std::cout << "  -c, --clean             Remove temporary .m2v and audio files after converting\n";
+    std::cout << "  -r, --reencode          Re-encode VP9 to H.264 via ffmpeg (WMP compatible)\n";
     std::cout << "\n";
     std::cout << "Examples:\n";
     std::cout << "  usm_toolkit extract movie.usm\n";
     std::cout << "  usm_toolkit convert movie.usm -o output/ -c\n";
+    std::cout << "  usm_toolkit convert movie.usm -r   (re-encode VP9 to H.264)\n";
     std::cout << "  usm_toolkit convert ./usm_folder/\n";
 }
 
@@ -140,10 +143,52 @@ std::string create_ffmpeg_parameters(usm_toolkit::CriUsmStream& usm_stream,
 
 bool convert_file(const std::string& file_path, 
                   const std::string& output_dir,
-                  bool clean_temp_files) {
+                  bool clean_temp_files,
+                  bool reencode) {
     std::cout << "File: " << file_path << std::endl;
     
     try {
+        std::string pure_file_name = usm_toolkit::FileUtils::get_filename_without_extension(file_path);
+        
+        if (!output_dir.empty() && !fs::exists(output_dir)) {
+            fs::create_directories(output_dir);
+        }
+        
+        std::string mp4_output;
+        if (!output_dir.empty()) {
+            mp4_output = usm_toolkit::FileUtils::combine_path(output_dir, pure_file_name + ".mp4");
+        } else {
+            mp4_output = usm_toolkit::FileUtils::combine_path(
+                usm_toolkit::FileUtils::get_directory_name(file_path),
+                pure_file_name + ".mp4");
+        }
+        
+        if (usm_toolkit::Vp9Pipeline::is_vp9_usm(file_path) && !reencode) {
+            std::cout << "VP9 video detected, using native pipeline..." << std::endl;
+            
+            usm_toolkit::Vp9PipelineConfig pipeline_config;
+            pipeline_config.input_path = file_path;
+            pipeline_config.output_path = mp4_output;
+            
+            usm_toolkit::Vp9PipelineResult result = usm_toolkit::Vp9Pipeline().execute(pipeline_config);
+            
+            if (result.success) {
+                std::cout << "Video: " << result.width << "x" << result.height 
+                          << ", " << result.frames_written << " frames"
+                          << ", " << result.duration_ms << "ms" << std::endl;
+            } else {
+                std::cerr << "Error: " << result.error_message << std::endl;
+                return false;
+            }
+            
+            std::cout << "Done: " << mp4_output << std::endl;
+            return true;
+        }
+        
+        if (!usm_toolkit::Vp9Pipeline::is_vp9_usm(file_path)) {
+            std::cout << "Non-VP9 stream, using FFmpeg pipeline..." << std::endl;
+        }
+        
         usm_toolkit::CriUsmStream usm_stream(file_path);
         
         std::cout << "Demuxing..." << std::endl;
@@ -154,24 +199,17 @@ bool convert_file(const std::string& file_path,
         
         usm_stream.demultiplex_streams(options);
         
-        // Create output directory if specified
-        if (!output_dir.empty() && !fs::exists(output_dir)) {
-            fs::create_directories(output_dir);
-        }
-        
-        // Find config.json next to executable or in current directory
         std::string config_path = "config.json";
         usm_toolkit::JoinConfig config = load_config(config_path);
         
-        std::string pure_file_name = usm_toolkit::FileUtils::get_filename_without_extension(file_path);
-        
-        // Check for ADX audio - needs conversion to WAV first
-        if (usm_stream.get_final_audio_extension() == ".adx") {
+        if (reencode) {
+            std::cout << "--reencode: encoding to H.264..." << std::endl;
+            config.video_parameter = "-c:v libx264 -preset fast -crf 23";
+            config.audio_parameter = "-c:a aac -b:a 128k";
+        } else if (usm_stream.get_final_audio_extension() == ".adx") {
             std::cout << "ADX audio detected. FFmpeg should handle it directly." << std::endl;
-            // Note: Modern FFmpeg can handle ADX directly. If not, vgmstream would be needed.
         }
         
-        // Build FFmpeg command
         std::string ffmpeg_params = create_ffmpeg_parameters(
             usm_stream, pure_file_name, output_dir, config);
         
@@ -182,7 +220,6 @@ bool convert_file(const std::string& file_path,
             std::cerr << "Warning: FFmpeg returned error code " << result << std::endl;
         }
         
-        // Clean temporary files if requested
         if (clean_temp_files) {
             std::cout << "Cleaning up temporary files..." << std::endl;
             
@@ -206,7 +243,8 @@ bool convert_file(const std::string& file_path,
 void process_path(const std::string& input_path, 
                   bool convert_mode,
                   const std::string& output_dir,
-                  bool clean_temp_files) {
+                  bool clean_temp_files,
+                  bool reencode) {
     if (!fs::exists(input_path)) {
         std::cerr << "Error: Path does not exist: " << input_path << std::endl;
         return;
@@ -218,7 +256,7 @@ void process_path(const std::string& input_path,
             if (entry.is_regular_file() && 
                 entry.path().extension() == ".usm") {
                 if (convert_mode) {
-                    convert_file(entry.path().string(), output_dir, clean_temp_files);
+                    convert_file(entry.path().string(), output_dir, clean_temp_files, reencode);
                 } else {
                     extract_file(entry.path().string());
                 }
@@ -227,7 +265,7 @@ void process_path(const std::string& input_path,
     } else {
         // Process single file
         if (convert_mode) {
-            convert_file(input_path, output_dir, clean_temp_files);
+            convert_file(input_path, output_dir, clean_temp_files, reencode);
         } else {
             extract_file(input_path);
         }
@@ -260,7 +298,7 @@ int main(int argc, char* argv[]) {
         }
         
         std::string input_path = argv[2];
-        process_path(input_path, false, "", false);
+        process_path(input_path, false, "", false, false);
         return 0;
     }
     
@@ -274,6 +312,7 @@ int main(int argc, char* argv[]) {
         std::string input_path = argv[2];
         std::string output_dir;
         bool clean_temp_files = false;
+        bool reencode = false;
         
         // Parse options
         for (int i = 3; i < argc; ++i) {
@@ -283,10 +322,12 @@ int main(int argc, char* argv[]) {
                 output_dir = argv[++i];
             } else if (arg == "-c" || arg == "--clean") {
                 clean_temp_files = true;
+            } else if (arg == "-r" || arg == "--reencode") {
+                reencode = true;
             }
         }
         
-        process_path(input_path, true, output_dir, clean_temp_files);
+        process_path(input_path, true, output_dir, clean_temp_files, reencode);
         return 0;
     }
     

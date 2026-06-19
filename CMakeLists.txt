@@ -23,6 +23,11 @@ set(SOURCES
     src/file_utils.cpp
     src/mpeg_stream.cpp
     src/usm_stream.cpp
+    src/ivf_parser.cpp
+    src/native_mp4_muxer.cpp
+    src/vp9_pipeline.cpp
+    src/adx_decoder.cpp
+    src/hca_decoder.cpp
 )
 
 # Header files
@@ -32,6 +37,11 @@ set(HEADERS
     include/mpeg_stream.hpp
     include/usm_stream.hpp
     include/usm_toolkit.hpp
+    include/ivf_parser.hpp
+    include/native_mp4_muxer.hpp
+    include/vp9_pipeline.hpp
+    include/adx_decoder.hpp
+    include/hca_decoder.hpp
 )
 
 # Create executable
